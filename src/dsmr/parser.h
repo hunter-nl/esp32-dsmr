@@ -164,30 +164,13 @@ namespace dsmr
 
       return res.until(str_end + 1); // Skip )
     }
-  };
 
-  // Do not use F() for multiply-used strings (including strings used from
-  // multiple template instantiations), that would result in multiple
-  // instances of the string in the binary
-  static constexpr char INVALID_NUMBER[] = "Invalid number";
-  static constexpr char INVALID_UNIT[] = "Invalid unit";
+    // Parse decimal part, if any
+    if (max_decimals && num_end < end && *num_end == '.') {
+      ++num_end;
 
-  struct NumParser
-  {
-    static ParseResult<uint32_t> parse(size_t max_decimals, const char *unit, const char *str, const char *end)
-    {
-      ParseResult<uint32_t> res;
-      if (str >= end || *str != '(')
-        return res.fail("Missing (", str);
-
-      const char *num_start = str + 1; // Skip (
-      const char *num_end = num_start;
-
-      uint32_t value = 0;
-
-      // Parse integer part
-      while (num_end < end && !strchr("*.)", *num_end))
-      {
+      while(num_end < end && !strchr("*)", *num_end) && max_decimals) {
+        --max_decimals;
         if (*num_end < '0' || *num_end > '9')
           return res.fail(INVALID_NUMBER, num_end);
         value *= 10;
@@ -195,20 +178,25 @@ namespace dsmr
         ++num_end;
       }
 
-      // Parse decimal part, if any
-      if (max_decimals && num_end < end && *num_end == '.')
-      {
-        ++num_end;
+    // Fill in missing decimals with zeroes
+    while(max_decimals--)
+      value *= 10;
 
-        while (num_end < end && !strchr("*)", *num_end) && max_decimals--)
-        {
-          if (*num_end < '0' || *num_end > '9')
-            return res.fail(INVALID_NUMBER, num_end);
-          value *= 10;
-          value += *num_end - '0';
-          ++num_end;
-        }
+    // If a unit was passed, check that the unit in the messages
+    // messages the unit passed.
+    if (unit && *unit) {
+      if (num_end >= end || *num_end != '*')
+        return res.fail(F("Missing unit"), num_end);
+      const char *unit_start = ++num_end; // skip *
+      while(num_end < end && *num_end != ')' && *unit) {
+        // Next character in units do not match?
+        if (*num_end++ != *unit++)
+          return res.fail((const __FlashStringHelper*)INVALID_UNIT, unit_start);
       }
+      // At the end of the message unit, but not the passed unit?
+      if (*unit)
+        return res.fail((const __FlashStringHelper*)INVALID_UNIT, unit_start);
+    }
 
       // Fill in missing decimals with zeroes
       while (max_decimals--)

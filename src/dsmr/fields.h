@@ -52,23 +52,80 @@ namespace dsmr
   /**
  * Superclass for data items in a P1 message.
  */
-  template <typename T>
-  struct ParsedField
-  {
-    template <typename F>
-    void apply(F &f) { f.apply(*static_cast<T *>(this)); }
-    // By defaults, fields have no unit
-    static const char *unit() { return ""; }
-  };
+template <typename T>
+struct ParsedField {
+  template <typename F>
+  void apply(F& f) {
+    f.apply(*static_cast<T*>(this));
+  }
+  // By defaults, fields have no unit
+  static const char *unit() { return ""; }
+};
 
-  template <typename T, size_t minlen, size_t maxlen>
-  struct StringField : ParsedField<T>
-  {
-    ParseResult<void> parse(const char *str, const char *end)
-    {
-      ParseResult<String> res = StringParser::parse_string(minlen, maxlen, str, end);
-      if (!res.err)
-        static_cast<T *>(this)->val() = res.result;
+template <typename T, size_t minlen, size_t maxlen>
+struct StringField : ParsedField<T> {
+  ParseResult<void> parse(const char *str, const char *end) {
+    ParseResult<String> res = StringParser::parse_string(minlen, maxlen, str, end);
+    if (!res.err)
+      static_cast<T*>(this)->val() = res.result;
+    return res;
+  }
+};
+
+// A timestamp is essentially a string using YYMMDDhhmmssX format (where
+// X is W or S for wintertime or summertime). Parsing this into a proper
+// (UNIX) timestamp is hard to do generically. Parsing it into a
+// single integer needs > 4 bytes top fit and isn't very useful (you
+// cannot really do any calculation with those values). So we just parse
+// into a string for now.
+template <typename T>
+struct TimestampField : StringField<T, 13, 13> { };
+
+// Value that is parsed as a three-decimal float, but stored as an
+// integer (by multiplying by 1000). Supports val() (or implicit cast to
+// float) to get the original value, and int_val() to get the more
+// efficient integer value. The unit() and int_unit() methods on
+// FixedField return the corresponding units for these values.
+struct FixedValue {
+  operator float() { return val();}
+  float val() { return _value / 1000.0;}
+  uint32_t int_val() { return _value; }
+
+  uint32_t _value;
+};
+
+// Floating point numbers in the message never have more than 3 decimal
+// digits. To prevent inefficient floating point operations, we store
+// them as a fixed-point number: an integer that stores the value in
+// thousands. For example, a value of 1.234 kWh is stored as 1234. This
+// effectively means that the integer value is the value in Wh. To allow
+// automatic printing of these values, both the original unit and the
+// integer unit is passed as a template argument.
+template <typename T, const char *_unit, const char *_int_unit>
+struct FixedField : ParsedField<T> {
+  ParseResult<void> parse(const char *str, const char *end) {
+    ParseResult<uint32_t> res = NumParser::parse(3, _unit, str, end);
+    if (!res.err)
+      static_cast<T*>(this)->val()._value = res.result;
+    return res;
+  }
+
+  static const char *unit() { return _unit; }
+  static const char *int_unit() { return _int_unit; }
+};
+
+struct TimestampedFixedValue : public FixedValue {
+  String timestamp;
+};
+
+// Some numerical values are prefixed with a timestamp. This is simply
+// both of them concatenated, e.g. 0-1:24.2.1(150117180000W)(00473.789*m3)
+template <typename T, const char *_unit, const char *_int_unit>
+struct TimestampedFixedField : public FixedField<T, _unit, _int_unit> {
+  ParseResult<void> parse(const char *str, const char *end) {
+    // First, parse timestamp
+    ParseResult<String> res = StringParser::parse_string(13, 13, str, end);
+    if (res.err)
       return res;
     }
   };
@@ -219,15 +276,27 @@ namespace dsmr
     const uint8_t THERMAL_MBUS_ID = DSMR_THERMAL_MBUS_ID;
     const uint8_t SUB_MBUS_ID = DSMR_SUB_MBUS_ID;
 
+template <typename FieldT>
+struct NameConverter {
+  public:
+    operator const __FlashStringHelper*() const { return reinterpret_cast<const __FlashStringHelper*>(&FieldT::name_progmem); }
+};
+
 #define DEFINE_FIELD(fieldname, value_t, obis, field_t, field_args...) \
-  struct fieldname : field_t<fieldname, ##field_args>                  \
-  {                                                                    \
-    value_t fieldname;                                                 \
-    bool fieldname##_present = false;                                  \
-    static constexpr ObisId id = obis;                                 \
-    static constexpr char name[] = #fieldname;                         \
-    value_t &val() { return fieldname; }                               \
-    bool &present() { return fieldname##_present; }                    \
+  struct fieldname : field_t<fieldname, ##field_args> { \
+    value_t fieldname; \
+    bool fieldname ## _present = false; \
+    static constexpr ObisId id = obis; \
+    static constexpr char name_progmem[] DSMR_PROGMEM = #fieldname; \
+    /* name field is for compatibility with a __FlashStringHelper *name \
+     * field that was previously used, but no longer worked on newer gcc \
+     * versions. The get_name() method should be used instead. \
+     * TODO (breaking change): Remove name field, rename get_name() to \
+     * name() and add deprecated get_name() that calls name(). */ \
+    [[gnu::deprecated]] static constexpr NameConverter<dsmr::fields::fieldname> name = {}; \
+    static const __FlashStringHelper *get_name() { return reinterpret_cast<const __FlashStringHelper*>(&name_progmem); } \
+    value_t& val() { return fieldname; } \
+    bool& present() { return fieldname ## _present; } \
   }
 
     /* Meter identification. This is not a normal field, but a

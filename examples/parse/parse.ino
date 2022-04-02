@@ -123,14 +123,11 @@ using MyData = ParsedData<
  * if you just manually printed all field names and values (with no
  * cost at all if you don't use the Printer).
  */
-struct Printer
-{
-  template <typename Item>
-  void apply(Item &i)
-  {
-    if (i.present())
-    {
-      Serial.print(Item::name);
+struct Printer {
+  template<typename Item>
+  void apply(Item &i) {
+    if (i.present()) {
+      Serial.print(Item::get_name());
       Serial.print(F(": "));
       Serial.print(i.val());
       Serial.print(Item::unit());
