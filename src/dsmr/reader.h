@@ -205,6 +205,14 @@ namespace dsmr
     }
 
     /**
+     * Returns the full datastream read so far.
+     */
+    const String &raw()
+    {
+      return buffer;
+    }
+    
+    /**
      * If a complete message has been received, parse it and store the
      * result into the ParsedData object passed.
      *
