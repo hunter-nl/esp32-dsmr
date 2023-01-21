@@ -141,7 +141,7 @@ namespace dsmr
           for (uint8_t i = 0; i < CrcParser::CRC_LEN; ++i)
           {
             buf[i] = this->stream->read();
-            streambuffer.concat((char)c);
+            streambuffer.concat((char)buf[i]);
           }
           ParseResult<uint16_t> crc = CrcParser::parse(buf, buf + lengthof(buf));
 
@@ -268,6 +268,7 @@ namespace dsmr
     bool once;
     State state;
     String buffer;
+    String streambuffer;
     uint16_t crc;
   };
 
