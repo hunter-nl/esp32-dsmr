@@ -103,7 +103,10 @@ namespace dsmr
       digitalWrite(this->req_pin, LOW);
       this->state = State::DISABLED_STATE;
       if (!this->_available)
+      {
         this->buffer = "";
+        this->streambuffer = "";
+      }
       // Clear any pending bytes
       while (this->stream->read() >= 0) /* nothing */
         ;
@@ -136,8 +139,10 @@ namespace dsmr
 
           char buf[CrcParser::CRC_LEN];
           for (uint8_t i = 0; i < CrcParser::CRC_LEN; ++i)
+          {
             buf[i] = this->stream->read();
-
+            streambuffer.concat((char)c);
+          }
           ParseResult<uint16_t> crc = CrcParser::parse(buf, buf + lengthof(buf));
 
           // Prepare for next message
@@ -160,7 +165,7 @@ namespace dsmr
           int c = this->stream->read();
           if (c < 0)
             return false;
-
+          streambuffer.concat((char)c);
           switch (this->state)
           {
           case State::DISABLED_STATE:
@@ -205,11 +210,11 @@ namespace dsmr
     }
 
     /**
-     * Returns the full datastream read so far.
+     * Returns the full data stream read so far.
      */
-    const String &raw()
+    const String &rawstream()
     {
-      return buffer;
+      return streambuffer;
     }
     
     /**
@@ -244,6 +249,7 @@ namespace dsmr
       if (_available)
       {
         buffer = "";
+        streambuffer = "";
         _available = false;
       }
     }
